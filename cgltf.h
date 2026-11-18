@@ -906,6 +906,27 @@ cgltf_size cgltf_animation_index(const cgltf_data* data, const cgltf_animation* 
 cgltf_size cgltf_animation_sampler_index(const cgltf_animation* animation, const cgltf_animation_sampler* object);
 cgltf_size cgltf_animation_channel_index(const cgltf_animation* animation, const cgltf_animation_channel* object);
 
+/*
+ * Animation sampling: evaluates animation samplers and channels at a given time (in seconds).
+ * Times outside the keyframe range are clamped to the first/last keyframe.
+ *
+ * `cgltf_animation_sampler_sample` evaluates a single sampler; `element_size` is the number of
+ * floats per keyframe (3 for translation/scale, 4 for rotation, target count for weights) and
+ * `out` must have room for `element_size` floats. Linear interpolation is component-wise; use
+ * `cgltf_animation_channel_sample` for rotation channels to get quaternion interpolation.
+ *
+ * `cgltf_animation_channel_sample` evaluates the channel's sampler using the channel's target
+ * path to determine the element size; rotation channels use spherical linear interpolation for
+ * cgltf_interpolation_type_linear and normalize the result for cgltf_interpolation_type_cubic_spline.
+ *
+ * `cgltf_animation_sample` evaluates all channels of an animation and writes the results into
+ * the target nodes' translation/rotation/scale/weights properties; returns the number of
+ * channels that were applied.
+ */
+cgltf_bool cgltf_animation_sampler_sample(const cgltf_animation_sampler* sampler, cgltf_float time, cgltf_size element_size, cgltf_float* out);
+cgltf_bool cgltf_animation_channel_sample(const cgltf_animation_channel* channel, cgltf_float time, cgltf_float* out);
+cgltf_size cgltf_animation_sample(const cgltf_animation* animation, cgltf_float time);
+
 #ifdef __cplusplus
 }
 #endif
@@ -931,6 +952,7 @@ cgltf_size cgltf_animation_channel_index(const cgltf_animation* animation, const
 #include <stdio.h>  /* For fopen */
 #include <limits.h> /* For UINT_MAX etc */
 #include <float.h>  /* For FLT_MAX */
+#include <math.h>   /* For sqrtf, sinf, acosf */
 
 #if !defined(CGLTF_MALLOC) || !defined(CGLTF_FREE) || !defined(CGLTF_ATOI) || !defined(CGLTF_ATOF) || !defined(CGLTF_ATOLL)
 #include <stdlib.h> /* For malloc, free, atoi, atof */
@@ -2673,6 +2695,274 @@ cgltf_size cgltf_animation_channel_index(const cgltf_animation* animation, const
 {
 	assert(object && (cgltf_size)(object - animation->channels) < animation->channels_count);
 	return (cgltf_size)(object - animation->channels);
+}
+
+static cgltf_float cgltf_animation_read_keyframe_time(const cgltf_animation_sampler* sampler, cgltf_size index)
+{
+	cgltf_float result = 0;
+	cgltf_accessor_read_float(sampler->input, index, &result, 1);
+	return result;
+}
+
+static void cgltf_animation_normalize_quaternion(cgltf_float* q)
+{
+	cgltf_float length = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+	if (length > 0)
+	{
+		cgltf_float inv_length = 1.0f / length;
+		q[0] *= inv_length;
+		q[1] *= inv_length;
+		q[2] *= inv_length;
+		q[3] *= inv_length;
+	}
+}
+
+static void cgltf_animation_slerp(const cgltf_float* a, const cgltf_float* b, cgltf_float t, cgltf_float* out)
+{
+	cgltf_float bn[4] = { b[0], b[1], b[2], b[3] };
+	cgltf_float dot = a[0] * bn[0] + a[1] * bn[1] + a[2] * bn[2] + a[3] * bn[3];
+
+	/* take the shortest path: negate one quaternion if they are more than 90 degrees apart */
+	if (dot < 0)
+	{
+		dot = -dot;
+		bn[0] = -bn[0];
+		bn[1] = -bn[1];
+		bn[2] = -bn[2];
+		bn[3] = -bn[3];
+	}
+
+	if (dot > 0.9995f)
+	{
+		/* quaternions are too close for a stable slerp; use normalized lerp instead */
+		for (int i = 0; i < 4; ++i)
+			out[i] = a[i] + t * (bn[i] - a[i]);
+		cgltf_animation_normalize_quaternion(out);
+		return;
+	}
+
+	cgltf_float theta = acosf(dot < 1.0f ? dot : 1.0f);
+	cgltf_float sin_theta = sinf(theta);
+	cgltf_float wa = sinf((1.0f - t) * theta) / sin_theta;
+	cgltf_float wb = sinf(t * theta) / sin_theta;
+
+	for (int i = 0; i < 4; ++i)
+		out[i] = wa * a[i] + wb * bn[i];
+}
+
+static cgltf_bool cgltf_animation_sampler_read_slot(const cgltf_animation_sampler* sampler, cgltf_size slot, cgltf_size elements_per_slot, cgltf_size element_size, cgltf_float* out)
+{
+	/* a logical keyframe slot may span multiple accessor elements (e.g. morph weights stored
+	   in a scalar accessor), so read it element by element */
+	cgltf_size components = element_size / elements_per_slot;
+	for (cgltf_size i = 0; i < elements_per_slot; ++i)
+	{
+		if (!cgltf_accessor_read_float(sampler->output, slot * elements_per_slot + i, out + i * components, components))
+			return 0;
+	}
+	return 1;
+}
+
+static cgltf_bool cgltf_animation_sampler_sample_ex(const cgltf_animation_sampler* sampler, cgltf_float time, cgltf_size element_size, cgltf_bool is_rotation, cgltf_float* out)
+{
+	if (sampler == NULL || sampler->input == NULL || sampler->output == NULL || out == NULL || element_size == 0)
+		return 0;
+
+	cgltf_size keyframe_count = sampler->input->count;
+	if (keyframe_count == 0)
+		return 0;
+
+	cgltf_size spline_stride = sampler->interpolation == cgltf_interpolation_type_cubic_spline ? 3 : 1;
+
+	/* the output accessor stores element_size floats per keyframe slot; for scalar outputs
+	   (e.g. morph weights) a single logical element spans multiple accessor elements */
+	cgltf_size components = cgltf_num_components(sampler->output->type);
+	if (components == 0 || element_size % components != 0)
+		return 0;
+	cgltf_size elements_per_slot = element_size / components;
+
+	if (sampler->output->count < keyframe_count * spline_stride * elements_per_slot)
+		return 0;
+
+	/* clamp to the keyframe range */
+	cgltf_float first_time = cgltf_animation_read_keyframe_time(sampler, 0);
+	cgltf_float last_time = cgltf_animation_read_keyframe_time(sampler, keyframe_count - 1);
+
+	if (time <= first_time || keyframe_count == 1)
+		return cgltf_animation_sampler_read_slot(sampler, spline_stride == 3 ? 1 : 0, elements_per_slot, element_size, out);
+	if (time >= last_time)
+		return cgltf_animation_sampler_read_slot(sampler, (keyframe_count - 1) * spline_stride + (spline_stride == 3 ? 1 : 0), elements_per_slot, element_size, out);
+
+	/* binary search for the keyframe segment [lo, lo + 1] containing time */
+	cgltf_size lo = 0, hi = keyframe_count - 1;
+	while (hi - lo > 1)
+	{
+		cgltf_size mid = lo + (hi - lo) / 2;
+		if (cgltf_animation_read_keyframe_time(sampler, mid) <= time)
+			lo = mid;
+		else
+			hi = mid;
+	}
+
+	cgltf_float t0 = cgltf_animation_read_keyframe_time(sampler, lo);
+	cgltf_float t1 = cgltf_animation_read_keyframe_time(sampler, hi);
+	cgltf_float dt = t1 - t0;
+	cgltf_float t = dt > 0 ? (time - t0) / dt : 0;
+
+	if (sampler->interpolation == cgltf_interpolation_type_step)
+		t = 0;
+
+	if (sampler->interpolation == cgltf_interpolation_type_cubic_spline)
+	{
+		cgltf_float p0[16], p1[16], m0[16], m1[16];
+		if (element_size > 16)
+			return 0;
+		if (!cgltf_animation_sampler_read_slot(sampler, lo * 3 + 1, elements_per_slot, element_size, p0))
+			return 0;
+		if (!cgltf_animation_sampler_read_slot(sampler, lo * 3 + 2, elements_per_slot, element_size, m0))
+			return 0;
+		if (!cgltf_animation_sampler_read_slot(sampler, hi * 3 + 0, elements_per_slot, element_size, m1))
+			return 0;
+		if (!cgltf_animation_sampler_read_slot(sampler, hi * 3 + 1, elements_per_slot, element_size, p1))
+			return 0;
+
+		/* tangents are stored per second; scale them to the segment duration */
+		for (cgltf_size i = 0; i < element_size; ++i)
+		{
+			m0[i] *= dt;
+			m1[i] *= dt;
+		}
+
+		cgltf_float t2 = t * t;
+		cgltf_float t3 = t2 * t;
+		cgltf_float h00 = 2 * t3 - 3 * t2 + 1;
+		cgltf_float h10 = t3 - 2 * t2 + t;
+		cgltf_float h01 = 3 * t2 - 2 * t3;
+		cgltf_float h11 = t3 - t2;
+
+		for (cgltf_size i = 0; i < element_size; ++i)
+			out[i] = h00 * p0[i] + h10 * m0[i] + h01 * p1[i] + h11 * m1[i];
+
+		/* cubic spline interpolation of quaternions does not preserve unit length */
+		if (is_rotation)
+			cgltf_animation_normalize_quaternion(out);
+
+		return 1;
+	}
+
+	cgltf_float v0[16], v1[16];
+	if (element_size > 16)
+		return 0;
+	if (!cgltf_animation_sampler_read_slot(sampler, lo, elements_per_slot, element_size, v0))
+		return 0;
+	if (!cgltf_animation_sampler_read_slot(sampler, hi, elements_per_slot, element_size, v1))
+		return 0;
+
+	if (is_rotation && sampler->interpolation == cgltf_interpolation_type_linear)
+	{
+		cgltf_animation_slerp(v0, v1, t, out);
+		return 1;
+	}
+
+	for (cgltf_size i = 0; i < element_size; ++i)
+		out[i] = v0[i] + t * (v1[i] - v0[i]);
+
+	return 1;
+}
+
+cgltf_bool cgltf_animation_sampler_sample(const cgltf_animation_sampler* sampler, cgltf_float time, cgltf_size element_size, cgltf_float* out)
+{
+	return cgltf_animation_sampler_sample_ex(sampler, time, element_size, 0, out);
+}
+
+cgltf_bool cgltf_animation_channel_sample(const cgltf_animation_channel* channel, cgltf_float time, cgltf_float* out)
+{
+	if (channel == NULL || channel->sampler == NULL)
+		return 0;
+
+	cgltf_size element_size = 0;
+	switch (channel->target_path)
+	{
+	case cgltf_animation_path_type_translation:
+	case cgltf_animation_path_type_scale:
+		element_size = 3;
+		break;
+	case cgltf_animation_path_type_rotation:
+		element_size = 4;
+		break;
+	case cgltf_animation_path_type_weights:
+	{
+		const cgltf_animation_sampler* sampler = channel->sampler;
+		if (sampler->input == NULL || sampler->output == NULL || sampler->input->count == 0)
+			return 0;
+		cgltf_size spline_stride = sampler->interpolation == cgltf_interpolation_type_cubic_spline ? 3 : 1;
+		cgltf_size slots = sampler->input->count * spline_stride;
+		if (slots == 0 || sampler->output->count % slots != 0)
+			return 0;
+		element_size = sampler->output->count / slots * cgltf_num_components(sampler->output->type);
+		break;
+	}
+	default:
+		return 0;
+	}
+
+	if (element_size == 0)
+		return 0;
+
+	return cgltf_animation_sampler_sample_ex(channel->sampler, time, element_size, channel->target_path == cgltf_animation_path_type_rotation, out);
+}
+
+cgltf_size cgltf_animation_sample(const cgltf_animation* animation, cgltf_float time)
+{
+	cgltf_size applied = 0;
+
+	if (animation == NULL)
+		return 0;
+
+	for (cgltf_size i = 0; i < animation->channels_count; ++i)
+	{
+		const cgltf_animation_channel* channel = &animation->channels[i];
+		cgltf_node* node = channel->target_node;
+
+		if (node == NULL)
+			continue;
+
+		switch (channel->target_path)
+		{
+		case cgltf_animation_path_type_translation:
+			if (cgltf_animation_channel_sample(channel, time, node->translation))
+			{
+				node->has_translation = 1;
+				applied++;
+			}
+			break;
+		case cgltf_animation_path_type_rotation:
+			if (cgltf_animation_channel_sample(channel, time, node->rotation))
+			{
+				node->has_rotation = 1;
+				applied++;
+			}
+			break;
+		case cgltf_animation_path_type_scale:
+			if (cgltf_animation_channel_sample(channel, time, node->scale))
+			{
+				node->has_scale = 1;
+				applied++;
+			}
+			break;
+		case cgltf_animation_path_type_weights:
+			if (node->weights && node->weights_count &&
+				cgltf_animation_sampler_sample_ex(channel->sampler, time, node->weights_count, 0, node->weights))
+			{
+				applied++;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
+	return applied;
 }
 
 cgltf_size cgltf_accessor_unpack_indices(const cgltf_accessor* accessor, void* out, cgltf_size out_component_size, cgltf_size index_count)
