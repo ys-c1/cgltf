@@ -1,0 +1,108 @@
+{
+ "asset": {
+  "version": "2.0"
+ },
+ "buffers": [
+  {
+   "uri": "data.bin",
+   "byteLength": 44
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 36,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 36,
+   "byteLength": 8,
+   "target": 34963
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 3,
+   "type": "VEC3",
+   "min": [
+    0,
+    0,
+    0
+   ],
+   "max": [
+    1,
+    1,
+    0
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5123,
+   "count": 3,
+   "type": "SCALAR"
+  }
+ ],
+ "images": [
+  {
+   "uri": "img0.png"
+  },
+  {
+   "uri": "img1.png"
+  }
+ ],
+ "textures": [
+  {
+   "source": 0,
+   "name": "tex0"
+  },
+  {
+   "source": 1,
+   "name": "tex1"
+  }
+ ],
+ "materials": [
+  {
+   "name": "mat0",
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0
+    }
+   },
+   "normalTexture": {
+    "index": 1
+   }
+  }
+ ],
+ "meshes": [
+  {
+   "name": "mesh0",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "node0",
+   "mesh": 0
+  }
+ ],
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ]
+}
