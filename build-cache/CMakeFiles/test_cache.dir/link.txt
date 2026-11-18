@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -DNDEBUG -fsanitize=address -Wl,--dependency-file=CMakeFiles/test_cache.dir/link.d CMakeFiles/test_cache.dir/test_cache.c.o -o test_cache

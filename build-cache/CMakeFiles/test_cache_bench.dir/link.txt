@@ -1,0 +1,1 @@
+/usr/bin/cc -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_cache_bench.dir/link.d CMakeFiles/test_cache_bench.dir/test_cache.c.o -o test_cache_bench
