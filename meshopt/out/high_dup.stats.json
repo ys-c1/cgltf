@@ -1,0 +1,35 @@
+{
+  "primitives": [
+    {
+      "mesh": "high_dup",
+      "primitive": 0,
+      "triangles": 12,
+      "vertices_before": 36,
+      "vertices_after": 8,
+      "indices_before": 36,
+      "indices_after": 36,
+      "was_indexed": false,
+      "triangles_reordered": 11,
+      "triangle_order_change_pct": 91.67,
+      "acmr_before": 3.0000,
+      "acmr_after": 0.6667,
+      "vertex_fetches_before": 36,
+      "vertex_fetches_after": 8,
+      "index_bytes_before": 0,
+      "index_bytes_after": 72,
+      "vertex_stride_bytes": 32,
+      "bandwidth_before_bytes": 1152,
+      "bandwidth_after_bytes": 328,
+      "bandwidth_saving_pct": 71.53
+    }
+  ],
+  "totals": {
+    "vertices_before": 36,
+    "vertices_after": 8,
+    "indices_before": 36,
+    "indices_after": 36,
+    "bandwidth_before_bytes": 1152,
+    "bandwidth_after_bytes": 328,
+    "bandwidth_saving_pct": 71.53
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "primitives": [
+    {
+      "mesh": "multi_prim",
+      "primitive": 0,
+      "triangles": 2,
+      "vertices_before": 6,
+      "vertices_after": 3,
+      "indices_before": 6,
+      "indices_after": 6,
+      "was_indexed": false,
+      "triangles_reordered": 0,
+      "triangle_order_change_pct": 0.00,
+      "acmr_before": 3.0000,
+      "acmr_after": 1.5000,
+      "vertex_fetches_before": 6,
+      "vertex_fetches_after": 3,
+      "index_bytes_before": 0,
+      "index_bytes_after": 12,
+      "vertex_stride_bytes": 32,
+      "bandwidth_before_bytes": 192,
+      "bandwidth_after_bytes": 108,
+      "bandwidth_saving_pct": 43.75
+    },
+    {
+      "mesh": "multi_prim",
+      "primitive": 1,
+      "triangles": 2,
+      "vertices_before": 4,
+      "vertices_after": 4,
+      "indices_before": 6,
+      "indices_after": 6,
+      "was_indexed": true,
+      "triangles_reordered": 0,
+      "triangle_order_change_pct": 0.00,
+      "acmr_before": 2.0000,
+      "acmr_after": 2.0000,
+      "vertex_fetches_before": 4,
+      "vertex_fetches_after": 4,
+      "index_bytes_before": 12,
+      "index_bytes_after": 12,
+      "vertex_stride_bytes": 32,
+      "bandwidth_before_bytes": 140,
+      "bandwidth_after_bytes": 140,
+      "bandwidth_saving_pct": 0.00
+    }
+  ],
+  "totals": {
+    "vertices_before": 10,
+    "vertices_after": 7,
+    "indices_before": 12,
+    "indices_after": 12,
+    "bandwidth_before_bytes": 332,
+    "bandwidth_after_bytes": 248,
+    "bandwidth_saving_pct": 25.30
+  }
+}

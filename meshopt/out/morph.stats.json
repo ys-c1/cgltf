@@ -1,0 +1,35 @@
+{
+  "primitives": [
+    {
+      "mesh": "morph",
+      "primitive": 0,
+      "triangles": 2,
+      "vertices_before": 6,
+      "vertices_after": 3,
+      "indices_before": 6,
+      "indices_after": 6,
+      "was_indexed": true,
+      "triangles_reordered": 0,
+      "triangle_order_change_pct": 0.00,
+      "acmr_before": 2.0000,
+      "acmr_after": 1.5000,
+      "vertex_fetches_before": 4,
+      "vertex_fetches_after": 3,
+      "index_bytes_before": 12,
+      "index_bytes_after": 12,
+      "vertex_stride_bytes": 80,
+      "bandwidth_before_bytes": 332,
+      "bandwidth_after_bytes": 252,
+      "bandwidth_saving_pct": 24.10
+    }
+  ],
+  "totals": {
+    "vertices_before": 6,
+    "vertices_after": 3,
+    "indices_before": 6,
+    "indices_after": 6,
+    "bandwidth_before_bytes": 332,
+    "bandwidth_after_bytes": 252,
+    "bandwidth_saving_pct": 24.10
+  }
+}
